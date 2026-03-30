@@ -1,0 +1,19 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Data sensible
+data/
+*.db
+
+# MISP Docker (trop lourd)
+misp-docker/
+
+# ngrok
+ngrok-v3-stable-linux-amd64.tgz
+
+# Backup
+*.bk
