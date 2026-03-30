@@ -1,0 +1,15 @@
+flask
+fastapi
+uvicorn
+requests
+python-dotenv
+stix2
+scikit-learn
+joblib
+numpy
+pandas
+schedule
+reportlab
+httpx
+pytest
+pycti
