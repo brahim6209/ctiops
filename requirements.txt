@@ -13,3 +13,4 @@ reportlab
 httpx
 pytest
 pycti
+flask-cors
