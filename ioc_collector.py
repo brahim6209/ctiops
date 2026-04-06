@@ -74,7 +74,7 @@ def _mock_github_secrets() -> int:
     mocks = [
         {"type":"ip", "value":"192.30.255.112", "source":"github_secret_scanning", "tlp":"TLP:AMBER"},
         {"type":"domain", "value":"raw.githubusercontent.com.evil.io", "source":"github_secret_scanning", "tlp":"TLP:RED"},
-        {"type":"hash", "value":"a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3", "source":"github_actions_artifact", "tlp":"TLP:RED"},
+        {"type":"hash", "value":"", "source":"github_actions_artifact", "tlp":"TLP:RED"},
     ]
     for m in mocks:
         insert_ioc(m)
@@ -180,8 +180,8 @@ def _mock_abusech() -> int:
     mocks = [
         {"type":"url",  "value":"https://s3.evil-bucket.aws-cdn-login.com/payload.sh", "source":"abusech_urlhaus", "tlp":"TLP:WHITE"},
         {"type":"url",  "value":"http://fake-docker-registry.io/ubuntu:latest/malware", "source":"abusech_urlhaus", "tlp":"TLP:WHITE"},
-        {"type":"hash", "value":"5d41402abc4b2a76b9719d911017c592e1d9e4f8b8c4a7f3c8e2d1b0a9f8e7d6", "source":"abusech_malwarebazaar", "tlp":"TLP:WHITE"},
-        {"type":"hash", "value":"7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069", "source":"abusech_malwarebazaar", "tlp":"TLP:WHITE"},
+        {"type":"hash", "value":"", "source":"abusech_malwarebazaar", "tlp":"TLP:WHITE"},
+        {"type":"hash", "value":"", "source":"abusech_malwarebazaar", "tlp":"TLP:WHITE"},
     ]
     for m in mocks:
         insert_ioc(m)
@@ -260,7 +260,7 @@ def _mock_otx() -> int:
         {"type":"ip",     "value":"194.165.16.29",  "source":"otx_pulse:aws_abuse", "tlp":"TLP:WHITE"},
         {"type":"domain", "value":"kubernetes-dashboard.evil.com", "source":"otx_pulse:k8s", "tlp":"TLP:WHITE"},
         {"type":"domain", "value":"aws-signin-console.net", "source":"otx_pulse:phishing", "tlp":"TLP:WHITE"},
-        {"type":"hash",   "value":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "source":"otx_pulse:docker_malware", "tlp":"TLP:WHITE"},
+        {"type":"hash",   "value":"", "source":"otx_pulse:docker_malware", "tlp":"TLP:WHITE"},
     ]
     for m in mocks:
         insert_ioc(m)
@@ -377,3 +377,43 @@ def run_ioc_collector() -> int:
 if __name__ == "__main__":
     init_db()
     run_ioc_collector()
+
+
+def get_ioc_stats() -> dict:
+    """Stats IOC pour le dashboard — avec résultats VT."""
+    from database import get_conn
+    with get_conn() as c:
+        cols = [col[1] for col in c.execute("PRAGMA table_info(ioc)").fetchall()]
+        has_vt = "vt_verdict" in cols
+
+        total    = c.execute("SELECT COUNT(*) FROM ioc").fetchone()[0]
+        by_type  = dict(c.execute("SELECT type, COUNT(*) FROM ioc GROUP BY type").fetchall())
+        by_source= dict(c.execute("SELECT source, COUNT(*) FROM ioc GROUP BY source ORDER BY 2 DESC").fetchall())
+
+        malicious  = c.execute("SELECT COUNT(*) FROM ioc WHERE vt_verdict='MALICIOUS'").fetchone()[0] if has_vt else 0
+        suspicious = c.execute("SELECT COUNT(*) FROM ioc WHERE vt_verdict='SUSPICIOUS'").fetchone()[0] if has_vt else 0
+        pending    = c.execute("SELECT COUNT(*) FROM ioc WHERE vt_verdict='PENDING'").fetchone()[0] if has_vt else total
+        by_vt      = dict(c.execute("SELECT vt_verdict, COUNT(*) FROM ioc GROUP BY vt_verdict").fetchall()) if has_vt else {}
+
+        # Top IOC malveillants VT
+        top_malicious = []
+        if has_vt:
+            rows = c.execute("""
+                SELECT value, type, source, vt_score, vt_malicious
+                FROM ioc WHERE vt_verdict IN ('MALICIOUS','SUSPICIOUS')
+                ORDER BY vt_malicious DESC LIMIT 10
+            """).fetchall()
+            top_malicious = [{"value": r[0], "type": r[1], "source": r[2],
+                               "vt_score": r[3], "vt_malicious": r[4]} for r in rows]
+
+    return {
+        "total":         total,
+        "malicious":     malicious,
+        "suspicious":    suspicious,
+        "pending_vt":    pending,
+        "by_type":       by_type,
+        "by_source":     by_source,
+        "by_vt_verdict": by_vt,
+        "top_malicious": top_malicious,
+        "top_threats":   []
+    }
