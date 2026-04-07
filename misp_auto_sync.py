@@ -18,7 +18,7 @@ MISP_CERT = False
 def get_misp():
     return PyMISP(MISP_URL, MISP_KEY, MISP_CERT)
 
-# ── PUSH CVE CRITIQUES → MISP ─────────────────────────────────────
+# ── PUSH CVE CRITIQUES → MISP 
 def push_critical_cves(limit=20):
     """Push CVE CRITICAL/HIGH non encore pushées vers MISP."""
     misp = get_misp()
@@ -95,7 +95,7 @@ def push_critical_cves(limit=20):
     return {"pushed": pushed, "errors": errors, "type": "cve"}
 
 
-# ── PUSH INCIDENTS DEVSECOPS → MISP ──────────────────────────────
+# ── PUSH INCIDENTS DEVSECOPS  
 def push_devsecops_incidents(limit=30):
     """Push les incidents DevSecOps (GitLeaks, Trivy) vers MISP."""
     misp = get_misp()
@@ -196,7 +196,7 @@ def push_devsecops_incidents(limit=30):
     return {"pushed": pushed, "errors": errors, "type": "incidents"}
 
 
-# ── SYNC COMPLÈTE ─────────────────────────────────────────────────
+# ── SYNC COMPLÈTE
 def full_sync():
     """Synchronisation complète CTI → MISP."""
     print(f"\n[MISP Auto-Sync] Démarrage — {datetime.datetime.now().isoformat()}")

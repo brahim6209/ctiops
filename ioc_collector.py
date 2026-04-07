@@ -18,9 +18,7 @@ AWS_REGION    = os.getenv("AWS_REGION", "us-east-1")
 
 TLP_MAP = {"CRITICAL":"TLP:RED","HIGH":"TLP:AMBER","MEDIUM":"TLP:AMBER","LOW":"TLP:WHITE"}
 
-# ─────────────────────────────────────────────────────────────
 # SOURCE 1 — GitHub Secret Scanning API
-# ─────────────────────────────────────────────────────────────
 
 def collect_github_secrets() -> int:
     """Collecte les alertes Secret Scanning depuis un repo GitHub."""
@@ -82,9 +80,8 @@ def _mock_github_secrets() -> int:
     return len(mocks)
 
 
-# ─────────────────────────────────────────────────────────────
 # SOURCE 2 — Abuse.ch (URLhaus + MalwareBazaar) — 100% gratuit
-# ─────────────────────────────────────────────────────────────
+
 
 def collect_abusech_urlhaus() -> int:
     """Collecte les URLs malveillantes récentes depuis URLhaus (Abuse.ch)."""
@@ -194,9 +191,9 @@ def _mock_abusech() -> int:
     return len(mocks)
 
 
-# ─────────────────────────────────────────────────────────────
+
 # SOURCE 3 — AlienVault OTX (Open Threat Exchange)
-# ─────────────────────────────────────────────────────────────
+
 
 def collect_otx_cloud_iocs() -> int:
     """Collecte les IOC cloud depuis AlienVault OTX pulses."""
@@ -273,9 +270,7 @@ def _mock_otx() -> int:
     return len(mocks)
 
 
-# ─────────────────────────────────────────────────────────────
 # SOURCE 4 — AWS GuardDuty (si clés AWS configurées)
-# ─────────────────────────────────────────────────────────────
 
 def collect_aws_guardduty() -> int:
     """Collecte les findings AWS GuardDuty."""
@@ -347,9 +342,9 @@ def _mock_guardduty() -> int:
     return len(mocks)
 
 
-# ─────────────────────────────────────────────────────────────
+
 # COLLECTEUR PRINCIPAL
-# ─────────────────────────────────────────────────────────────
+ 
 
 def run_ioc_collector() -> int:
     """Lance tous les collecteurs IOC dynamiques."""

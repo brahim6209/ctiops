@@ -179,7 +179,7 @@ def train_model():
     print(f"[ML] Modèle sauvegardé: {MODEL_PATH}")
     return model_data
 
-# ── PREDICTION ────────────────────────────────────────────────────
+# ── PREDICTION 
 _model_cache = None
 
 def load_model():

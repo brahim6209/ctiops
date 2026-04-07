@@ -60,9 +60,70 @@ def task_misp_sync():
     log("MISP sync started...")
     try:
         from misp_connector import push_cves, push_incidents
-        c = push_cves(limit=10)
-        i = push_incidents(limit=20)
-        log(f"MISP done: CVE={c} incidents={i}")
+        from pymisp import PyMISP, MISPEvent
+        from database import get_conn
+        import os
+        from dotenv import load_dotenv
+        load_dotenv('/home/br1kx/cti/ctiops/.env')
+
+        # 1. Push CVE + incidents
+        c_pushed = push_cves(limit=10)
+        i_pushed = push_incidents(limit=20)
+
+        # 2. Push IOC MALICIOUS non encore pushés (dynamique)
+        MISP_URL = os.getenv('MISP_URL', 'https://localhost')
+        MISP_KEY = os.getenv('MISP_KEY')
+        ioc_pushed = 0
+
+        if MISP_KEY:
+            misp = PyMISP(MISP_URL, MISP_KEY, ssl=False)
+
+            with get_conn() as conn:
+                new_iocs = conn.execute("""
+                    SELECT id, type, value, source, vt_malicious, vt_verdict
+                    FROM ioc
+                    WHERE vt_verdict = 'MALICIOUS'
+                    AND pushed_opencti = 0
+                    ORDER BY vt_malicious DESC
+                    LIMIT 20
+                """).fetchall()
+
+            if new_iocs:
+                event = MISPEvent()
+                event.info = f"CTI Platform — {len(new_iocs)} Malicious IOC — VT Auto-Confirmed"
+                event.distribution = 0
+                event.threat_level_id = 1
+                event.analysis = 2
+                event.add_tag('tlp:white')
+                event.add_tag('cti-platform:auto-enriched')
+                event.add_tag('threat-type:botnet-c2')
+
+                ids_to_mark = []
+                for ioc in new_iocs:
+                    d = dict(ioc)
+                    misp_type = 'ip-dst' if d['type'] == 'ip' else d['type']
+                    event.add_attribute(
+                        misp_type, d['value'],
+                        category='Network activity',
+                        to_ids=True,
+                        comment=f"Source:{d['source']} | VT:{d['vt_malicious']} engines | Auto-pushed"
+                    )
+                    ids_to_mark.append(d['id'])
+
+                result = misp.add_event(event)
+                if result and not result.get('errors'):
+                    eid = result.get('Event',{}).get('id')
+                    with get_conn() as conn:
+                        for ioc_id in ids_to_mark:
+                            conn.execute(
+                                "UPDATE ioc SET pushed_opencti=1 WHERE id=?",
+                                (ioc_id,)
+                            )
+                    ioc_pushed = len(ids_to_mark)
+                    log(f"MISP IOC event #{eid} créé: {ioc_pushed} IOC pushés")
+
+        log(f"MISP done: CVE={c_pushed} incidents={i_pushed} IOC={ioc_pushed}")
+
     except Exception as e:
         log(f"MISP error: {e}")
 

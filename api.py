@@ -550,6 +550,21 @@ register_cloud_endpoints(app)
 from devsecops_cve_api import register_devsecops_cve_routes
 register_devsecops_cve_routes(app)
 
+from devsecops_attack_paths import register_devsecops_attack_routes
+register_devsecops_attack_routes(app)
+
+from misp_ioc_enricher import register_misp_ioc_routes
+register_misp_ioc_routes(app)
+
+from otx_enricher import register_otx_routes
+register_otx_routes(app)
+
+from cve_ioc_pipeline import register_cve_ioc_routes
+register_cve_ioc_routes(app)
+
+from vt_scanner import register_vt_routes
+register_vt_routes(app)
+
 if __name__ == "__main__":
     # Démarrer le scheduler automatique
     try:
