@@ -9,7 +9,7 @@ from pymisp import PyMISP, MISPEvent, MISPAttribute
 from dotenv import load_dotenv
 from database import get_conn
 
-load_dotenv()
+load_dotenv('/home/br1kx/cti/ctiops/.env')
 
 MISP_URL  = os.getenv("MISP_URL", "https://localhost")
 MISP_KEY  = os.getenv("MISP_KEY", "ctiprojectapikey1234567890abcdef12345678")
@@ -39,6 +39,18 @@ def get_misp():
 # ─────────────────────────────────────────
 # PUSH CVE → MISP Events
 # ─────────────────────────────────────────
+
+def get_tlp_for_cve(cve: dict) -> str:
+    """TLP selon Reality Score et exploitation active."""
+    reality = float(cve.get('reality_score') or 0)
+    active  = bool(cve.get('actively_exploited'))
+    cvss    = float(cve.get('cvss_score') or 0)
+    if reality > 80 or active or cvss >= 9.0:
+        return 'TLP:AMBER'
+    return 'TLP:WHITE'
+
+def get_distribution_for_tlp(tlp: str) -> int:
+    return {'TLP:RED':0,'TLP:AMBER':1,'TLP:WHITE':3}.get(tlp, 1)
 
 def push_cves(limit=50) -> int:
     """Push les CVE critiques/high vers MISP."""
@@ -178,6 +190,28 @@ SEV_TO_THREAT = {
     "CRITICAL": 1, "HIGH": 2, "MEDIUM": 3, "LOW": 4
 }
 
+def get_tlp_for_incident(inc: dict) -> str:
+    """Déterminer le TLP selon le type d'incident.
+    
+    Politique :
+    - Secret compromis    → TLP:RED   (DevOps uniquement)
+    - Incident CI/CD      → TLP:AMBER (DevOps + SOC)
+    - Attaque cloud       → TLP:AMBER (Cloud + SOC)
+    """
+    source = inc.get('source','')
+    etype  = inc.get('event_type','')
+    sev    = inc.get('severity','')
+
+    # Secrets exposés → TLP:RED (jamais partagé hors org)
+    if source == 'gitleaks' or 'secret' in etype.lower():
+        return 'TLP:RED'
+
+    # Incidents critiques pipeline → TLP:AMBER
+    if sev in ('CRITICAL','HIGH') or source in ('trivy','owasp'):
+        return 'TLP:AMBER'
+
+    return 'TLP:AMBER'  # Par défaut AMBER pour incidents
+
 def push_incidents(limit=20) -> int:
     """Push les incidents CI/CD critiques vers MISP."""
     misp = get_misp()
@@ -202,8 +236,13 @@ def push_incidents(limit=20) -> int:
             event.analysis = 1
 
             # Tags
-            tlp = inc['tlp'] if inc['tlp'] else 'TLP:WHITE'
+            tlp = get_tlp_for_incident(dict(inc))
+            event.distribution = get_distribution_for_tlp(tlp)
             event.add_tag(TLP_TAGS.get(tlp, 'tlp:white'))
+            if tlp == 'TLP:RED':
+                event.add_tag('cti:audience=DevOps-only')
+            elif tlp == 'TLP:AMBER':
+                event.add_tag('cti:audience=DevOps+SOC')
             event.add_tag('cicd-security')
             event.add_tag('cloud-security')
             if inc['mitre_id']:

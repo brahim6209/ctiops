@@ -10,7 +10,7 @@ import os, re, json, requests, time
 from database import get_conn
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv('/home/br1kx/cti/ctiops/.env')
 VT_KEY = os.getenv("VIRUSTOTAL_API_KEY", "")
 
 # ─── NLP Classifier ──────────────────────────────────────────────────────────

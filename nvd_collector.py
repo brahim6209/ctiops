@@ -8,7 +8,7 @@ import requests, json, os, time
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from database import init_db, insert_cve, get_conn
-load_dotenv()
+load_dotenv('/home/br1kx/cti/ctiops/.env')
 
 NVD_URL  = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 CISA_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"

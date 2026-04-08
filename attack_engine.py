@@ -22,6 +22,8 @@ MITRE_MAP = {
     "T1041": {"stage":7,"name":"Exfil Over C2","kill_chain":"Actions"},
 }
 
+# ⚠️ LIMITE : Mapping CVE→MITRE basé sur mots-clés statiques (NVD utilise la même approche)
+# Précision non validée formellement — approximation raisonnable pour le prototype
 CVE_MITRE = {
     "rce":["T1190","T1059"], "remote code":["T1190","T1059"],
     "injection":["T1190","T1059"], "privilege":["T1068"],
@@ -33,14 +35,16 @@ CVE_MITRE = {
     "jenkins":["T1190","T1059"], "github":["T1195","T1552"],
 }
 
+# ⚠️ LIMITE : Seuls les stages 1,3,4,5 sont couverts par nos données
+# Stages 2 (Weaponization), 6 (C2), 7 (Actions) nécessitent un monitoring réseau non disponible
 KILL_CHAIN_STAGES = [
-    {"id":1,"name":"Reconnaissance"},
-    {"id":2,"name":"Weaponization"},
-    {"id":3,"name":"Delivery"},
-    {"id":4,"name":"Exploitation"},
-    {"id":5,"name":"Installation"},
-    {"id":6,"name":"Command & Control"},
-    {"id":7,"name":"Actions on Objectives"},
+    {"id":1,"name":"Reconnaissance",       "covered":True},
+    {"id":2,"name":"Weaponization",        "covered":False, "note":"Non couvert — pas de données"},
+    {"id":3,"name":"Delivery",             "covered":True},
+    {"id":4,"name":"Exploitation",         "covered":True},
+    {"id":5,"name":"Installation",         "covered":True},
+    {"id":6,"name":"Command & Control",    "covered":False, "note":"Non couvert — pas de monitoring réseau"},
+    {"id":7,"name":"Actions on Objectives","covered":False, "note":"Non couvert — pas de monitoring réseau"},
 ]
 
 def extract_features(cve):
@@ -153,6 +157,8 @@ def predict_devsecops_attack_paths():
     code_issues = [i for i in incs if i["source"]=="sonarqube"]
     if secrets:
         crit = [s for s in secrets if s["severity"] in ("CRITICAL","HIGH")]
+        # ⚠️ RÈGLE HEURISTIQUE (non ML) — baseline 60% + 10% par secret critique
+        # Justification : secrets exposés = compromission quasi-certaine si repo public
         prob = min(95, 60+len(crit)*10)
         paths.append({
             "id":"devsecops-secrets","source":"devsecops",

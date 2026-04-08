@@ -56,6 +56,94 @@ def task_verify_vt():
         log(f"VT error: {e}")
 
 # ── TÂCHE 5 : MISP Sync — toutes les 2h ──────────────────────────
+def task_collect_github_iocs():
+    """Collecter IOC depuis repos GitHub PoC des CVE critiques."""
+    log("GitHub PoC IOC collection started...")
+    try:
+        from github_ioc_collector import collect_github_iocs_for_cves
+        results = collect_github_iocs_for_cves(limit=5)
+        total_pocs = sum(len(r['github_pocs']) for r in results)
+        total_iocs = sum(len(r['iocs_found']) for r in results)
+        log(f"GitHub done: {len(results)} CVE | {total_pocs} PoC | {total_iocs} IOC")
+    except Exception as e:
+        log(f"GitHub error: {e}")
+
+def task_import_circl_feeds():
+    """Importer les events CIRCL récents et extraire les IOC dans notre DB."""
+    log("CIRCL community feeds import started...")
+    try:
+        import requests, urllib3, time
+        urllib3.disable_warnings()
+        from database import get_conn
+
+        MISP_URL = "https://localhost"
+        MISP_KEY = "4CpRG1g4sQqecJy3l1f1tCHroczs7xj2pQFQCdrC"
+        headers  = {"Authorization": MISP_KEY, "Accept": "application/json", "Content-Type": "application/json"}
+
+        # Télécharger manifest CIRCL
+        manifest = requests.get(
+            "https://www.circl.lu/doc/misp/feed-osint/manifest.json",
+            timeout=30
+        ).json()
+
+        # Events des 2 derniers jours
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+        recent = [(uuid, meta) for uuid, meta in manifest.items()
+                  if meta.get('date','') >= cutoff]
+        recent = sorted(recent, key=lambda x: x[1].get('timestamp',0), reverse=True)[:5]
+
+        total_iocs = 0
+        for uuid, meta in recent:
+            try:
+                r = requests.get(
+                    f"https://www.circl.lu/doc/misp/feed-osint/{uuid}.json",
+                    timeout=30
+                )
+                ev_data = r.json()
+                ev = ev_data.get('Event', ev_data)
+                attrs = ev.get('Attribute', [])
+
+                # Importer dans MISP
+                ev.pop('id', None); ev.pop('uuid', None)
+                r2 = requests.post(f"{MISP_URL}/events/add",
+                    headers=headers, verify=False,
+                    json=ev_data, timeout=30)
+
+                # Extraire IOC dans notre DB
+                iocs_added = 0
+                with get_conn() as conn:
+                    for attr in attrs:
+                        atype = attr.get('type','')
+                        val   = attr.get('value','')
+                        if not val or ':' in val:  # skip IPv6
+                            continue
+                        if atype in ('ip-src','ip-dst'):
+                            db_type = 'ip'
+                        elif atype == 'domain':
+                            db_type = 'domain'
+                        elif atype == 'url':
+                            db_type = 'url'
+                        else:
+                            continue
+                        try:
+                            conn.execute("""
+                                INSERT OR IGNORE INTO ioc (type,value,source,ml_score,tlp,vt_verdict)
+                                VALUES (?,?,?,0.5,'TLP:WHITE','PENDING')
+                            """, (db_type, val,
+                                  'Maltrail-CIRCL' if 'Maltrail' in meta.get('info','') else 'KRVTZ-IDS'))
+                            iocs_added += 1
+                        except:
+                            pass
+                total_iocs += iocs_added
+                time.sleep(1)
+            except Exception as e:
+                log(f"CIRCL import error: {e}")
+
+        log(f"CIRCL done: {len(recent)} events, {total_iocs} IOC ajoutés en DB")
+    except Exception as e:
+        log(f"CIRCL error: {e}")
+
 def task_misp_sync():
     log("MISP sync started...")
     try:
@@ -210,6 +298,8 @@ def run_scheduler():
     schedule.every(2).hours.do(task_verify_vt)
     schedule.every(2).hours.do(task_misp_sync)
     schedule.every(24).hours.do(task_update_kev)
+    schedule.every(24).hours.do(task_import_circl_feeds)
+    schedule.every(12).hours.do(task_collect_github_iocs)
     schedule.every(24).hours.do(task_update_epss)
     schedule.every(1).hours.do(task_snapshot_stats)
 
