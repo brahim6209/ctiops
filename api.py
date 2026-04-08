@@ -559,11 +559,28 @@ register_misp_ioc_routes(app)
 from otx_enricher import register_otx_routes
 register_otx_routes(app)
 
-from cve_ioc_pipeline import register_cve_ioc_routes
-register_cve_ioc_routes(app)
 
 from vt_scanner import register_vt_routes
 register_vt_routes(app)
+
+
+from ioc_api import register_ioc_routes as register_ioc_api_routes
+register_ioc_api_routes(app)
+
+# ── RL PATCH RECOMMENDER ─────────────────────────────────────────
+@app.route('/api/v1/ml/patch-recommendations')
+def api_patch_recommendations():
+    try:
+        from patch_rl_recommender import get_patch_recommendations
+        build = request.args.get('build','')
+        limit = int(request.args.get('limit', 15))
+        return jsonify(get_patch_recommendations(build=build, limit=limit))
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'trace': traceback.format_exc()[-300:]}), 500
+
+# from misp_feed_puller import register_misp_pull_routes  # conflit route
+# register_misp_pull_routes(app)  # conflit avec api.py ligne misp/feed
 
 if __name__ == "__main__":
     # Démarrer le scheduler automatique
