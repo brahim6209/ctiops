@@ -68,13 +68,13 @@ def api_stats():
             "high":          high_cve,
             "with_exploit":  exploit_cve,
             "active_exploit":active_cve,
-            "distribution":  {r["severity"]: r["n"] for r in sev_rows},
+            "distribution":  {(r["severity"] or "unknown"): r["n"] for r in sev_rows},
             "by_source":     {r["source"]: r["n"] for r in src_rows if r["source"]},
         },
         "incidents": {
             "total":        total_inc,
             "critical":     critical_inc,
-            "distribution": {r["event_type"]: r["n"] for r in inc_rows},
+            "distribution": {(r["event_type"] or "unknown"): r["n"] for r in inc_rows},
         },
         "ioc":  {"total": total_ioc},
         "risk": {
@@ -235,6 +235,8 @@ def api_incidents():
     limit    = int(request.args.get("limit", 100))
     sql = "SELECT * FROM incident WHERE 1=1"
     params = []
+    if source:
+        sql += " AND source=?"; params.append(source)
     if severity:
         sql += " AND severity=?"; params.append(severity)
     if source:
@@ -582,6 +584,321 @@ def api_patch_recommendations():
 # from misp_feed_puller import register_misp_pull_routes  # conflit route
 # register_misp_pull_routes(app)  # conflit avec api.py ligne misp/feed
 
+
+
+# ── Nouvelles routes auto-detector ──
+from database import get_conn as _get_conn
+
+@app.route('/api/v1/webhook/auto', methods=['POST'])
+def api_webhook_auto():
+    """Endpoint universel — détecte automatiquement l'outil et le projet."""
+    try:
+        from database import get_conn
+        from auto_detector import detect_and_parse, compute_risk
+        data     = request.get_json(force=True) or {}
+        report   = data.get('report', data)
+        project  = data.get('project', data.get('metadata', {}).get('project', 'unknown'))
+        build    = str(data.get('build', data.get('metadata', {}).get('build', '0')))
+        branch   = data.get('branch', data.get('metadata', {}).get('branch', 'main'))
+        repo     = data.get('repo', data.get('metadata', {}).get('repo', ''))
+        tool_hint= data.get('tool', '')
+
+        from pipeline_processor import process_build
+        detected = detect_and_parse(report)
+        tool     = tool_hint or detected['tool']
+        raw_findings = detected['findings']
+
+        # Traitement ML complet
+        processed = process_build(project, build, tool, raw_findings)
+
+        # Persistance enrichie
+        conn = get_conn()
+        inserted = 0
+        for f in processed['findings']:
+            details = json.dumps({
+                'build': build, 'branch': branch, 'repo': repo,
+                'project': project, 'tool': tool,
+                'package': f.get('package',''),
+                'version': f.get('version',''),
+                'fixed':   f.get('fixed',''),
+                'file':    f.get('file',''),
+                'cvss':    f.get('cvss', 0),
+                'reality_score': f.get('reality_score', 0),
+                'category':      f.get('category',''),
+                'attack_path':   f.get('attack_path',''),
+                'mitre':         f.get('mitre',''),
+                'title':         f.get('title',''),
+            })
+            conn.execute("""
+                INSERT OR IGNORE INTO incident
+                (cve_id, severity, source, details, created_at)
+                VALUES (?,?,?,?,datetime('now'))
+            """, (
+                f.get('id','UNKNOWN'),
+                f.get('severity','UNKNOWN'),
+                tool, details
+            ))
+            inserted += 1
+        conn.commit()
+
+        return jsonify({
+            'status':               'ok',
+            'tool':                 tool,
+            'project':              project,
+            'build':                build,
+            'detected_automatically': detected['detected'],
+            'total_findings':       processed['total'],
+            'inserted':             inserted,
+            'risk_level':           'CRITICAL' if processed['critical'] > 0 else 'HIGH' if processed['high'] > 0 else 'MEDIUM',
+            'critical':             processed['critical'],
+            'high':                 processed['high'],
+            'avg_reality_score':    processed['avg_reality'],
+            'categories':           processed['categories'],
+            'attack_paths_predicted': processed['attack_paths'],
+            'severity_dist': {
+                s: sum(1 for f in processed['findings'] if f.get('severity','')==s)
+                for s in ['CRITICAL','HIGH','MEDIUM','LOW']
+            }
+        })
+    except Exception as e:
+        return jsonify({'status':'error','message':str(e)}), 500
+
+@app.route('/api/v1/projects', methods=['GET'])
+def api_projects():
+    """Liste tous les projets avec leurs builds et scanners détectés."""
+    try:
+        from database import get_conn
+        conn = get_conn()
+        rows = conn.execute("""
+            SELECT source, details, severity, created_at
+            FROM incident
+            WHERE details IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT 2000
+        """).fetchall()
+
+        projects = {}
+        for row in rows:
+            try:
+                det   = json.loads(row[1]) if row[1] else {}
+                proj  = det.get('project') or det.get('app') or row[0]
+                build = str(det.get('build') or '0')
+                tool  = det.get('tool') or row[0]
+                sev   = row[2]
+
+                if proj not in projects:
+                    projects[proj] = {'name': proj, 'builds': {}, 'total': 0}
+                if build not in projects[proj]['builds']:
+                    projects[proj]['builds'][build] = {'build': build, 'scanners': {}, 'total': 0, 'risk': 'LOW'}
+                if tool not in projects[proj]['builds'][build]['scanners']:
+                    projects[proj]['builds'][build]['scanners'][tool] = {'tool': tool, 'findings': 0, 'severities': {}}
+
+                projects[proj]['total'] += 1
+                projects[proj]['builds'][build]['total'] += 1
+                projects[proj]['builds'][build]['scanners'][tool]['findings'] += 1
+                sevs = projects[proj]['builds'][build]['scanners'][tool]['severities']
+                sevs[sev] = sevs.get(sev, 0) + 1
+            except Exception:
+                continue
+
+        result = []
+        for pname, pdata in projects.items():
+            builds_list = []
+            for bnum, bdata in sorted(pdata['builds'].items(), key=lambda x: -int(x[0]) if x[0].isdigit() else 0):
+                scanners_list = list(bdata['scanners'].values())
+                crits = sum(s.get('severities',{}).get('CRITICAL',0) for s in scanners_list)
+                highs = sum(s.get('severities',{}).get('HIGH',0) for s in scanners_list)
+                risk = 'CRITICAL' if crits > 0 else 'HIGH' if highs > 0 else 'MEDIUM'
+                builds_list.append({
+                    'build': bnum,
+                    'total': bdata['total'],
+                    'risk': risk,
+                    'scanners': scanners_list
+                })
+            result.append({'project': pname, 'builds': builds_list, 'total': pdata['total']})
+
+        return jsonify({'projects': result, 'total': len(result)})
+    except Exception as e:
+        return jsonify({'status':'error','message':str(e)}), 500
+
+@app.route('/agent')
+def serve_agent():
+    """Sert le script d'agent universel — installable via curl | bash."""
+    try:
+        import os
+        agent_path = os.path.join(os.path.dirname(__file__), 'ctiops-agent.sh')
+        with open(agent_path) as f:
+            script = f.read()
+        from flask import Response
+        return Response(script, mimetype='text/plain')
+    except Exception as e:
+        return str(e), 500
+
+# Démarrer le watcher au lancement de l'API
+try:
+    from report_watcher import start_watcher
+    start_watcher()
+    print("[WATCHER] Report watcher démarré")
+except Exception as e:
+    print(f"[WATCHER] Erreur démarrage: {e}")
+
+
+@app.route('/install')
+def serve_install():
+    """Installateur universel — curl -s http://HOST:5000/install | bash"""
+    try:
+        import os
+        from flask import Response, request
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'install.sh')
+        script = open(path).read()
+        host = request.host_url.rstrip('/')
+        script = script.replace('http://localhost:5000', host)
+        return Response(script, mimetype='text/plain')
+    except Exception as e:
+        return str(e), 500
+
+
+@app.route('/api/v1/projects/<project>/builds/<build>/incidents')
+def api_project_build_incidents(project, build):
+    try:
+        from database import get_conn
+        conn = get_conn()
+
+        rows = conn.execute("""
+            SELECT i.id, i.source, i.severity, i.details,
+                   i.created_at, i.event_type, i.mitre_id, i.repo
+            FROM incident i
+            WHERE i.details LIKE ? AND i.details LIKE ?
+            ORDER BY i.created_at DESC
+        """, (f'%"project": "{project}"%', f'%"build": "{build}"%')).fetchall()
+
+        data = []
+        for r in rows:
+            try:
+                d = json.loads(r[3]) if r[3] else {}
+                cve_id = d.get('cve_id', '')
+
+                # Enrichir depuis la table CVE (id = cve_id)
+                cvss = d.get('cvss_score', 0) or 0
+                epss, desc_cve, kev, attack_vector, reality_cve = 0, '', False, '', 0
+                if cve_id:
+                    cve_row = conn.execute(
+                        'SELECT cvss_score, epss_score, description, actively_exploited, attack_type, reality_score FROM cve WHERE id=?',
+                        (cve_id,)
+                    ).fetchone()
+                    if cve_row:
+                        cvss         = float(cve_row[0] or cvss or 0)
+                        epss         = float(cve_row[1] or 0)
+                        desc_cve     = cve_row[2] or d.get('description', '')
+                        kev          = bool(cve_row[3])
+                        attack_vector = cve_row[4] or ''
+                        reality_cve  = cve_row[5] or 0
+
+                data.append({
+                    'id':              r[0],
+                    'source':          r[1],
+                    'severity':        r[2],
+                    'details':         r[3],
+                    'created_at':      r[4],
+                    'event_type':      r[5] or '',
+                    'mitre_id':        r[6] or d.get('mitre', ''),
+                    'repo':            r[7] or d.get('repo', ''),
+                    'cve_id':          cve_id,
+                    'package':         d.get('package', ''),
+                    'version':         d.get('version', ''),
+                    'fixed_version':   d.get('fixed_version', '') or d.get('fixed', ''),
+                    'cvss_score':      cvss,
+                    'epss_score':      epss,
+                    'reality_score':   reality_cve or d.get('reality_score', 0) or d.get('ml_score', 0),
+                    'category':        d.get('category', '') or d.get('vuln_type', ''),
+                    'attack_path':     d.get('attack_path', ''),
+                    'mitre_technique': d.get('mitre', '') or r[6] or '',
+                    'tool':            d.get('tool', r[1]),
+                    'title':           d.get('title', '') or desc_cve,
+                    'branch':          d.get('branch', ''),
+                    'description':     desc_cve or d.get('description', ''),
+                    'kev':             kev,
+                    'attack_vector':   attack_vector,
+                    'file':            d.get('file', '') or d.get('target', ''),
+                    'rule_id':         d.get('rule_id', ''),
+                    'secret_hint':     d.get('secret_hint', ''),
+                    'entropy':         d.get('entropy', 0),
+                })
+            except Exception:
+                pass
+
+        critical = sum(1 for i in data if i['severity'] == 'CRITICAL')
+        high     = sum(1 for i in data if i['severity'] == 'HIGH')
+
+        scanners_map = {}
+        for i in data:
+            t = i['tool']
+            if t not in scanners_map:
+                scanners_map[t] = {'tool': t, 'total': 0, 'critical': 0, 'high': 0}
+            scanners_map[t]['total'] += 1
+            if i['severity'] == 'CRITICAL': scanners_map[t]['critical'] += 1
+            if i['severity'] == 'HIGH':     scanners_map[t]['high'] += 1
+
+        repo   = next((i['repo'] for i in data if i['repo']), '')
+        branch = next((i['branch'] for i in data if i['branch']), '')
+
+        return jsonify({
+            'project':        project,
+            'build':          build,
+            'repo':           repo,
+            'branch':         branch,
+            'total':          len(data),
+            'critical':       critical,
+            'high':           high,
+            'risk':           'CRITICAL' if critical > 0 else 'HIGH' if high > 0 else 'MEDIUM',
+            'scanners':       list(scanners_map.keys()),
+            'scanners_stats': list(scanners_map.values()),
+            'kev_count':      sum(1 for i in data if i.get('kev')),
+            'data':           data
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/v1/projects/<project>/builds')
+def api_project_builds(project):
+    """Retourne tous les builds d'un projet avec stats."""
+    try:
+        from database import get_conn
+        conn = get_conn()
+        rows = conn.execute("""
+            SELECT details, severity FROM incident
+            WHERE details LIKE ?
+        """, (f'%"project": "{project}"%',)).fetchall()
+
+        builds = {}
+        for r in rows:
+            try:
+                d = json.loads(r[0]) if r[0] else {}
+                b = str(d.get("build","0"))
+                tool = d.get("tool", "unknown")
+                sev = r[1]
+                if b not in builds:
+                    builds[b] = {"build": b, "total": 0, "critical": 0, "high": 0, "scanners": {}}
+                builds[b]["total"] += 1
+                if sev == "CRITICAL": builds[b]["critical"] += 1
+                if sev == "HIGH":     builds[b]["high"] += 1
+                if tool not in builds[b]["scanners"]:
+                    builds[b]["scanners"][tool] = {"tool": tool, "findings": 0,
+                                                    "severities": {"CRITICAL":0,"HIGH":0,"MEDIUM":0,"LOW":0}}
+                builds[b]["scanners"][tool]["findings"] += 1
+                builds[b]["scanners"][tool]["severities"][sev] =                     builds[b]["scanners"][tool]["severities"].get(sev, 0) + 1
+            except Exception:
+                pass
+
+        result = []
+        for b, data in sorted(builds.items(), key=lambda x: -int(x[0]) if x[0].isdigit() else 0):
+            data["risk"] = "CRITICAL" if data["critical"]>0 else "HIGH" if data["high"]>0 else "MEDIUM"
+            data["scanners"] = list(data["scanners"].values())
+            result.append(data)
+
+        return jsonify({"project": project, "builds": result, "total_builds": len(result)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     # Démarrer le scheduler automatique
     try:
@@ -692,3 +1009,5 @@ def api_scan_secrets():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+

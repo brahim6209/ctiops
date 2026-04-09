@@ -199,11 +199,11 @@ def get_tlp_for_incident(inc: dict) -> str:
     - Attaque cloud       → TLP:AMBER (Cloud + SOC)
     """
     source = inc.get('source','')
-    etype  = inc.get('event_type','')
+    etype  = inc.get('event_type','') or ''
     sev    = inc.get('severity','')
 
     # Secrets exposés → TLP:RED (jamais partagé hors org)
-    if source == 'gitleaks' or 'secret' in etype.lower():
+    if source == 'gitleaks' or 'secret' in (etype or '').lower():
         return 'TLP:RED'
 
     # Incidents critiques pipeline → TLP:AMBER
@@ -223,12 +223,13 @@ def push_incidents(limit=20) -> int:
             (limit,)
         ).fetchall()
 
+    incs = [dict(i) for i in incs]
     count = 0
     for inc in incs:
         try:
             event = MISPEvent()
             event.info = (
-                f"CI/CD Incident: {inc['event_type']} — "
+                f"CI/CD Incident: {inc.get('event_type','unknown')} — "
                 f"{inc['repo']} [{inc['severity']}]"
             )
             event.distribution = 0
@@ -257,7 +258,7 @@ def push_incidents(limit=20) -> int:
                     category='Attribution')
 
             event.add_attribute('comment',
-                f"Type: {inc['event_type']}\n"
+                f"Type: {inc.get('event_type','unknown')}\n"
                 f"Source: {inc['source']}\n"
                 f"MITRE: {inc['mitre_id']} — {inc['mitre_name']}\n"
                 f"ML Severity: {inc['ml_severity']}\n"
@@ -272,7 +273,7 @@ def push_incidents(limit=20) -> int:
                     (inc['id'],)
                 )
 
-            print(f"[MISP] Incident pushé : #{inc['id']} {inc['event_type']} → Event #{e.id}")
+            print(f"[MISP] Incident pushé : #{inc['id']} {inc.get('event_type','?')} → Event #{e.id}")
             count += 1
 
         except Exception as ex:
