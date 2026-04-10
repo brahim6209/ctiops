@@ -36,6 +36,10 @@ def normalize_finding(raw: dict, tool: str) -> dict:
         "tool":        tool,
         "cwe":         str(raw.get("cwe") or raw.get("CweIDs",[""])[0] if isinstance(raw.get("CweIDs"),list) else ""),
         "url":         raw.get("url") or raw.get("references",[""])[0] if isinstance(raw.get("references"),list) else "",
+        "rule_id":     raw.get("rule_id") or raw.get("RuleID") or raw.get("id",""),
+        "secret_hint": raw.get("secret_hint") or raw.get("secret","")[:30],
+        "entropy":     raw.get("entropy") or raw.get("Entropy") or 0,
+        "match":       raw.get("match") or raw.get("Match",""),
     }
 
 # ─── 2. REALITY SCORE (sans ML externe) ─────────────────────────────────────

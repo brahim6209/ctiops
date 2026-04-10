@@ -145,27 +145,34 @@ def process_file(filepath: str):
         # 3. Pipeline ML complet
         result = process_build(project, build, tool, findings)
 
-        # 3.5 Auto-insert new CVEs
-        _auto_enrich_cves(conn, result["findings"])
-
         # 4. Persister en base
         conn = get_conn()
+        _auto_enrich_cves(conn, result["findings"])
         inserted = 0
         for f in result["findings"]:
             details = json.dumps({
                 "project":       project,
                 "build":         build,
                 "tool":          tool,
+                "cve_id":        f.get("id","") or f.get("cve_id",""),
                 "package":       f.get("package",""),
                 "version":       f.get("version",""),
                 "fixed":         f.get("fixed",""),
+                "fixed_version": f.get("fixed",""),
                 "file":          f.get("file",""),
                 "cvss":          f.get("cvss",0),
+                "cvss_score":    f.get("cvss",0),
+                "epss_score":    f.get("epss",0),
                 "reality_score": f.get("reality_score",0),
                 "category":      f.get("category",""),
+                "vuln_type":     f.get("category",""),
                 "attack_path":   f.get("attack_path",""),
                 "mitre":         f.get("mitre",""),
                 "title":         f.get("title",""),
+                "description":   f.get("description",""),
+                "rule_id":       f.get("rule_id",""),
+                "secret_hint":   f.get("secret_hint",""),
+                "entropy":       f.get("entropy",0),
                 "source_file":   fname,
             })
             try:

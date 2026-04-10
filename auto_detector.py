@@ -28,11 +28,15 @@ DETECTORS = [
             "findings": [
                 {
                     "id": x.get("RuleID", x.get("ruleId","")),
+                    "rule_id": x.get("RuleID", x.get("ruleId","")),
                     "severity": "HIGH",
                     "file": x.get("File", x.get("file","")),
                     "line": x.get("StartLine", x.get("line",0)),
                     "secret": x.get("Secret","")[:20] + "...",
+                    "secret_hint": (x.get("Secret","") or "")[:30],
+                    "entropy": round(float(x.get("Entropy", 0) or 0), 2),
                     "description": x.get("Description", x.get("description","")),
+                    "match": x.get("Match","")[:50],
                 }
                 for x in d
             ]
