@@ -83,14 +83,16 @@ def parse_path(filepath: str) -> dict:
 
 
 def _auto_enrich_cves(conn, findings):
-    """Insère automatiquement les nouvelles CVE dans la table CVE pour enrichissement futur."""
+    """Insère et enrichit automatiquement les nouvelles CVE."""
+    import requests as _req, time as _time
     inserted = 0
+    to_enrich = []
     for f in findings:
         cve_id = f.get('id', '') or f.get('cve_id', '')
         if not cve_id or not cve_id.startswith('CVE-'):
             continue
-        exists = conn.execute("SELECT id FROM cve WHERE id=?", (cve_id,)).fetchone()
-        if not exists:
+        row = conn.execute("SELECT id, cvss_score FROM cve WHERE id=?", (cve_id,)).fetchone()
+        if not row:
             try:
                 conn.execute("""
                     INSERT OR IGNORE INTO cve
@@ -105,11 +107,63 @@ def _auto_enrich_cves(conn, findings):
                     f.get('category', '') or f.get('vuln_type', '')
                 ))
                 inserted += 1
+                to_enrich.append(cve_id)
             except Exception:
                 pass
+        elif not row[1] or row[1] == 0:
+            to_enrich.append(cve_id)
     if inserted > 0:
         conn.commit()
         print(f"[WATCHER] Auto-inserted {inserted} new CVEs into CVE table")
+    # Enrich CVSS from NVD
+    nvd_updated = 0
+    for cve_id in to_enrich[:30]:
+        try:
+            r = _req.get(
+                f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}",
+                timeout=8, headers={"User-Agent": "ctiops/1.0"}
+            )
+            vulns = r.json().get("vulnerabilities", [])
+            if vulns:
+                metrics = vulns[0].get("cve", {}).get("metrics", {})
+                cvss = 0
+                # Try NVD scores first, then CNA scores
+                for ver in ["cvssMetricV31", "cvssMetricV30", "cvssMetricV2"]:
+                    for entry in metrics.get(ver, []):
+                        score = entry.get("cvssData", {}).get("baseScore", 0)
+                        if score > 0:
+                            cvss = score
+                            break
+                    if cvss > 0:
+                        break
+                if cvss > 0:
+                    conn.execute("UPDATE cve SET cvss_score=? WHERE id=?", (cvss, cve_id))
+                    nvd_updated += 1
+            _time.sleep(0.6)
+        except Exception:
+            pass
+    if nvd_updated > 0:
+        conn.commit()
+        print(f"[WATCHER] NVD enriched {nvd_updated} CVEs with CVSS")
+    # Enrich EPSS
+    if to_enrich:
+        try:
+            resp = _req.get(
+                "https://api.first.org/data/v1/epss",
+                params={"cve": ",".join(to_enrich[:30])},
+                timeout=20
+            )
+            epss_updated = 0
+            for item in resp.json().get("data", []):
+                epss = float(item.get("epss", 0))
+                if epss > 0:
+                    conn.execute("UPDATE cve SET epss_score=? WHERE id=?", (epss, item["cve"]))
+                    epss_updated += 1
+            conn.commit()
+            if epss_updated > 0:
+                print(f"[WATCHER] EPSS enriched {epss_updated} CVEs")
+        except Exception:
+            pass
     return inserted
 
 def file_hash(filepath: str) -> str:

@@ -8,6 +8,38 @@ from database import get_conn
 
 # ─── 1. NORMALISATION UNIVERSELLE ────────────────────────────────────────────
 
+
+def recalibrate_severity_from_nvd(finding: dict, conn=None) -> dict:
+    """Recalibrate severity using NVD CVSS as source of truth."""
+    cve_id = finding.get("id","") or finding.get("cve_id","")
+    if not cve_id or not cve_id.startswith("CVE-"):
+        return finding
+    
+    cvss = 0
+    # Try CVE table first (already enriched by NVD)
+    if conn:
+        row = conn.execute("SELECT cvss_score FROM cve WHERE id=?", (cve_id,)).fetchone()
+        if row and row[0]:
+            cvss = float(row[0])
+    
+    # Fallback to finding cvss
+    if not cvss:
+        cvss = float(finding.get("cvss", 0) or 0)
+    
+    # NVD CVSS standard mapping
+    if cvss >= 9.0:
+        finding["severity"] = "CRITICAL"
+    elif cvss >= 7.0:
+        finding["severity"] = "HIGH"
+    elif cvss >= 4.0:
+        finding["severity"] = "MEDIUM"
+    elif cvss > 0:
+        finding["severity"] = "LOW"
+    # else keep original Trivy severity
+    
+    finding["cvss"] = cvss
+    return finding
+
 def normalize_finding(raw: dict, tool: str) -> dict:
     """Normalise n'importe quel finding vers le schéma interne CTIOps."""
     sev_map = {"CRITICAL":4,"HIGH":3,"MEDIUM":2,"LOW":1,"INFO":0,"UNKNOWN":0,
@@ -192,8 +224,15 @@ def process_build(project: str, build: str, tool: str, raw_findings: list) -> di
         # 2. Reality Score
         finding["reality_score"] = compute_reality_score(finding, cisa_kev_ids)
 
+        # 2.5 Recalibrate severity from NVD CVSS (source of truth)
+        try:
+            from database import get_conn as _get_conn
+            _conn = _get_conn()
+            finding = recalibrate_severity_from_nvd(finding, _conn)
+        except Exception:
+            finding = recalibrate_severity_from_nvd(finding)
         # 3. Classification NLP
-        finding["category"] = classify_finding(finding)
+        finding["category"] = "SECRET_LEAK" if tool == "gitleaks" else classify_finding(finding)
 
         # 4. Prédiction chemin d'attaque (seulement si score > 30)
         if finding["reality_score"] > 30:
@@ -214,7 +253,16 @@ def process_build(project: str, build: str, tool: str, raw_findings: list) -> di
             })
         else:
             finding["attack_path"] = ""
-            finding["mitre"] = ""
+            cat = finding.get("category","")
+            mitre_from_cat = {
+                "RCE": "T1059", "SQLI": "T1190", "SSRF": "T1090",
+                "AUTH_BYPASS": "T1078", "PATH_TRAVERSAL": "T1083",
+                "SUPPLY_CHAIN": "T1195", "SECRET_LEAK": "T1552",
+                "XSS": "T1059.007", "DOS": "T1499", "INJECTION": "T1059",
+                "MISCONFIG": "T1562", "PRIVESC": "T1068", "CVE": "T1190",
+                "OTHER": "T1203", "INFO_DISCLOSURE": "T1213",
+            }
+            finding["mitre"] = "T1552" if tool == "gitleaks" else mitre_from_cat.get(cat, "T1190")
 
         results.append(finding)
 
