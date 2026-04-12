@@ -46,6 +46,10 @@ CWE_TO_ATTACK_TYPE = {
     "CWE-285":  "AUTH_BYPASS",  # Improper Authorization
     "CWE-295":  "AUTH_BYPASS",  # Improper Certificate Validation
     "CWE-732":  "AUTH_BYPASS",  # Incorrect Permission Assignment
+    "CWE-1188": "AUTH_BYPASS",  # Insecure Default Initialization of Resource
+    "CWE-1391": "AUTH_BYPASS",  # Use of Weak Credentials
+    "CWE-1392": "AUTH_BYPASS",  # Use of Default Credentials
+    "CWE-1393": "AUTH_BYPASS",  # Use of Default Password
     "CWE-1390": "AUTH_BYPASS",  # Weak Authentication
 
     # PRIVESC — Privilege Escalation

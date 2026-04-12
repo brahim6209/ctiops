@@ -20,9 +20,9 @@ except Exception as _e:
 
 if "from nlp_classifier import" not in content:
     content = content.replace(old_import, new_import, 1)
-    print("✅ Import NLP ajouté")
+    print(" Import NLP ajouté")
 else:
-    print("⚠️  Import NLP déjà présent")
+    print("  Import NLP déjà présent")
 
 # ── 2. Remplacer classify_attack_type pour utiliser NLP en priorité ──
 old_classify = '''def classify_attack_type(description: str) -> str:
@@ -74,13 +74,13 @@ new_classify = '''def classify_attack_type(description: str) -> str:
 
 if old_classify in content:
     content = content.replace(old_classify, new_classify)
-    print("✅ classify_attack_type patché avec NLP")
+    print(" classify_attack_type patché avec NLP")
 else:
-    print("❌ Pattern classify_attack_type non trouvé — vérifiez manuellement")
+    print(" Pattern classify_attack_type non trouvé — vérifiez manuellement")
     print("   Cherchez: def classify_attack_type(description: str)")
 
 # ── Sauvegarder ──
 open(path, 'w').write(content)
-print(f"\n✅ {path} mis à jour")
+print(f"\n {path} mis à jour")
 print("\nProchain run d'enrichissement utilisera le NLP.")
 
