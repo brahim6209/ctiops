@@ -1,3 +1,4 @@
+import os
 """
 attack_engine.py — ML Attack Prediction Engine v2.0
 Cloud CVE + DevSecOps → Attack Paths + Kill Chain + Risk Scores
@@ -46,6 +47,51 @@ KILL_CHAIN_STAGES = [
     {"id":6,"name":"Command & Control",    "covered":False, "note":"Non couvert — pas de monitoring réseau"},
     {"id":7,"name":"Actions on Objectives","covered":False, "note":"Non couvert — pas de monitoring réseau"},
 ]
+
+# ── Kill Chain ML Classifier ─────────────────────────────────────
+_kc_model = None
+
+def get_kill_chain_classifier():
+    """Charger le modèle Kill Chain ML (TF-IDF + LR entraîné sur STIX)."""
+    global _kc_model
+    if _kc_model is not None:
+        return _kc_model
+    model_path = os.path.join(os.path.dirname(__file__), 
+                              'data/models/kill_chain_classifier.pkl')
+    try:
+        import joblib, os as _os
+        if _os.path.exists(model_path):
+            _kc_model = joblib.load(model_path)
+            print(f"[Kill Chain ML] Modèle chargé — Accuracy: {_kc_model.get('accuracy','?')}")
+            return _kc_model
+    except Exception as e:
+        print(f"[Kill Chain ML] Erreur: {e}")
+    return None
+
+def predict_kill_chain_stage(description: str) -> dict:
+    """
+    Prédire le stage Kill Chain depuis une description CVE.
+    Utilise TF-IDF + LR entraîné sur MITRE STIX enterprise-attack.json
+    Fallback sur mapping statique si modèle absent.
+    """
+    model_data = get_kill_chain_classifier()
+    if model_data:
+        pipeline = model_data['pipeline']
+        stage_names = model_data['stage_names']
+        try:
+            pred = int(pipeline.predict([description])[0])
+            proba = pipeline.predict_proba([description])[0]
+            conf = round(float(max(proba)) * 100, 1)
+            return {
+                'stage': pred,
+                'stage_name': stage_names.get(pred, 'Unknown'),
+                'confidence': conf,
+                'source': 'ML_STIX'
+            }
+        except Exception as e:
+            print(f"[Kill Chain ML] Prédiction erreur: {e}")
+    # Fallback statique
+    return {'stage': 4, 'stage_name': 'Exploitation', 'confidence': 0, 'source': 'STATIC'}
 
 def extract_features(cve):
     desc = (cve.get("description") or "").lower()
