@@ -16,6 +16,12 @@ VT_KEY = os.getenv("VIRUSTOTAL_API_KEY", "")
 # ─── NLP Classifier ──────────────────────────────────────────────────────────
 try:
     from nlp_classifier import NLPClassifier as _NLPClassifier
+from cwe_mitre_mapper import (
+    classify_with_cwe_priority,
+    get_mitre_from_attack_type,
+    get_attack_type_from_cwe,
+    ATTACK_TYPE_TO_MITRE
+)
     _nlp = _NLPClassifier.get()
 except Exception as _e:
     _nlp = None
@@ -214,7 +220,8 @@ def classify_attack_type(description: str) -> str:
 
 
 def get_mitre_for_type(attack_type: str) -> dict:
-    return MITRE_MAPPING.get(attack_type, MITRE_MAPPING["UNKNOWN"])
+    """Utilise le mapper officiel CWE → MITRE ATT&CK v14."""
+    return get_mitre_from_attack_type(attack_type)
 
 
 def get_recommendations(attack_type: str) -> list:
@@ -315,8 +322,9 @@ def enrich_cve(cve_id: str, use_vt: bool = True) -> dict:
             return {"error": f"CVE {cve_id} not found"}
         cve = dict(row)
 
-    # 1. Classification
-    attack_type = classify_attack_type(cve.get("description", ""))
+    # 1. Classification — CWE prioritaire sur NLP
+    cwe_id = cve.get("cwe_id") or cve.get("cwe") or ""
+    attack_type = classify_attack_type(cve.get("description", ""), cwe_id)
     mitre = get_mitre_for_type(attack_type)
     recs  = get_recommendations(attack_type)
 
