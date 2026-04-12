@@ -166,6 +166,33 @@ DETECTORS = [
     },
 ]
 
+def detect_weak_passwords(text_content: str) -> list:
+    import re
+    findings = []
+    patterns = [
+        (r'(?i)(?:password|passwd|pwd)\s*[=:]\s*([^\s\n\r#]{1,50})', 'weak-password'),
+        (r'(?i)spring\.datasource\.password\s*=\s*(\S+)', 'spring-datasource-password'),
+        (r'(?i)(?:db|database)\.password\s*[=:]\s*(\S+)', 'db-password'),
+    ]
+    for pattern, rule_id in patterns:
+        for match in re.finditer(pattern, text_content):
+            pwd = match.group(1).strip()
+            if pwd and pwd not in ('""', "''", '${', '<', 'your_', ''):
+                findings.append({
+                    "id": "WEAK-PWD-" + rule_id,
+                    "rule_id": rule_id,
+                    "severity": "HIGH",
+                    "file": "config",
+                    "secret": pwd,
+                    "secret_hint": pwd[:30],
+                    "entropy": round(len(set(pwd)) / max(len(pwd), 1) * 4, 2),
+                    "description": "Hardcoded password: " + rule_id,
+                    "match": match.group(0)[:60],
+                    "category": "SECRET_LEAK",
+                })
+    return findings
+
+
 def detect_and_parse(report: dict) -> dict:
     for detector in DETECTORS:
         try:

@@ -612,7 +612,7 @@ def api_webhook_auto():
         processed = process_build(project, build, tool, raw_findings)
 
         # Persistance enrichie
-        conn = get_conn()
+        conn = _get_conn()
         inserted = 0
         for f in processed['findings']:
             details = json.dumps({
@@ -668,7 +668,7 @@ def api_projects():
     """Liste tous les projets avec leurs builds et scanners détectés."""
     try:
         from database import get_conn
-        conn = get_conn()
+        conn = _get_conn()
         rows = conn.execute("""
             SELECT source, details, severity, created_at
             FROM incident
@@ -762,7 +762,7 @@ def serve_install():
 def api_project_build_incidents(project, build):
     try:
         from database import get_conn
-        conn = get_conn()
+        conn = _get_conn()
 
         rows = conn.execute("""
             SELECT i.id, i.source, i.severity, i.details,
@@ -863,7 +863,7 @@ def api_project_builds(project):
     """Retourne tous les builds d'un projet avec stats."""
     try:
         from database import get_conn
-        conn = get_conn()
+        conn = _get_conn()
         rows = conn.execute("""
             SELECT details, severity FROM incident
             WHERE details LIKE ?
@@ -898,6 +898,160 @@ def api_project_builds(project):
         return jsonify({"project": project, "builds": result, "total_builds": len(result)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/v1/ml/metrics')
+def api_ml_metrics():
+    """Retourne les métriques du modèle ML en temps réel."""
+    try:
+        from ml_attack_predictor import get_metrics, get_model
+        get_model()  # S'assurer que le modèle est entraîné
+        metrics = get_metrics()
+        return jsonify({
+            "status": "trained" if metrics["mae"] is not None else "not_trained",
+            "model": "RandomForestRegressor",
+            "n_estimators": metrics["n_estimators"],
+            "mae": metrics["mae"],
+            "r2": metrics["r2"],
+            "trained_at": metrics["trained_at"],
+            "n_samples": metrics["n_samples"],
+            "top_features": metrics["top_features"]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/v1/projects/<project>/builds/<build>/fixes')
+def api_build_fixes(project, build):
+    """Retourne les recommandations de fix priorisées par impact."""
+    try:
+        from database import get_conn
+        conn = _get_conn()
+        rows = conn.execute("""
+            SELECT
+                json_extract(i.details, '$.package') as pkg,
+                json_extract(i.details, '$.version') as ver,
+                json_extract(i.details, '$.fixed') as fixed,
+                COUNT(*) as nb_cve,
+                SUM(CASE WHEN i.severity='CRITICAL' THEN 1 ELSE 0 END) as nb_critical,
+                SUM(CASE WHEN i.severity='HIGH' THEN 1 ELSE 0 END) as nb_high,
+                MAX(COALESCE(c.cvss_score, json_extract(i.details,'$.cvss'), 0)) as max_cvss,
+                MAX(COALESCE(c.epss_score, 0)) as max_epss,
+                GROUP_CONCAT(DISTINCT json_extract(i.details,'$.cve_id')) as cve_list,
+                GROUP_CONCAT(DISTINCT json_extract(i.details,'$.category')) as categories
+            FROM incident i
+            LEFT JOIN cve c ON c.id = json_extract(i.details,'$.cve_id')
+            WHERE i.details LIKE ? AND i.details LIKE ?
+            AND i.source='trivy'
+            AND json_extract(i.details,'$.fixed') IS NOT NULL
+            AND json_extract(i.details,'$.fixed') != ''
+            GROUP BY pkg, ver, fixed
+            ORDER BY nb_critical DESC, nb_high DESC, max_cvss DESC
+        """, (f'%"project": "{project}"%', f'%"build": "{build}"%')).fetchall()
+
+        fixes = []
+        for r in rows:
+            pkg, ver, fixed, nb, crit, high, cvss, epss, cves, cats = r
+            fixes.append({
+                "package":     pkg,
+                "version":     ver,
+                "fix_version": fixed,
+                "nb_cve":      nb,
+                "nb_critical": crit or 0,
+                "nb_high":     high or 0,
+                "max_cvss":    round(float(cvss or 0), 1),
+                "max_epss":    round(float(epss or 0), 4),
+                "cve_ids":     (cves or "").split(",")[:5],
+                "categories":  list(set((cats or "").split(","))),
+                "priority":    "P0-IMMEDIATE" if crit > 0 else "P1-HIGH" if high > 0 else "P2-MEDIUM",
+                "impact":      f"Fixes {nb} CVE{'s' if nb>1 else ''} ({crit}C/{high}H)"
+            })
+
+        return jsonify({
+            "project": project,
+            "build":   build,
+            "total":   len(fixes),
+            "fixes":   fixes
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/v1/devsecops/breach", methods=["GET"])
+def api_devsecops_breach():
+    conn = _get_conn()
+    rows = conn.execute("SELECT id, severity, details FROM incident WHERE source='gitleaks' ORDER BY created_at DESC").fetchall()
+    secrets = []
+    for row in rows:
+        try:
+            det = json.loads(row[2])
+        except:
+            det = {}
+        secrets.append({
+            "id": row[0], "severity": row[1],
+            "rule_id": det.get("rule_id","secret"),
+            "file": det.get("file",""),
+            "secret_hint": det.get("secret_hint",""),
+            "entropy": det.get("entropy",0),
+            "build": det.get("build",""),
+            "project": det.get("project",""),
+            "breach_status": det.get("breach_status","PENDING"),
+            "breach_count": det.get("breach_count",0),
+            "mitre": det.get("mitre","T1552"),
+        })
+    total = len(secrets)
+    compromised = sum(1 for s in secrets if s["breach_status"]=="COMPROMISED")
+    clean = sum(1 for s in secrets if s["breach_status"]=="CLEAN")
+    pending = sum(1 for s in secrets if s["breach_status"] not in ("COMPROMISED","CLEAN"))
+    return jsonify({"total":total,"compromised":compromised,"clean":clean,"pending":pending,"breach_risk":round(compromised/total*100) if total>0 else 0,"secrets":secrets})
+
+@app.route("/api/v1/devsecops/breach/check", methods=["POST"])
+def api_devsecops_breach_check():
+    from threat_intel import check_password_breach
+    data = request.get_json()
+    secret = data.get("secret","")
+    incident_id = data.get("id")
+    if not secret:
+        return jsonify({"error":"secret requis"}), 400
+    result = check_password_breach(secret)
+    status = "COMPROMISED" if result.get("pwned") else "CLEAN"
+    if incident_id:
+        try:
+            conn = _get_conn()
+            row = conn.execute("SELECT details FROM incident WHERE id=?", (incident_id,)).fetchone()
+            if row:
+                det = json.loads(row[0])
+                det["breach_status"] = status
+                det["breach_count"] = result.get("count",0)
+                conn.execute("UPDATE incident SET details=? WHERE id=?", (json.dumps(det), incident_id))
+                conn.commit()
+        except Exception as e:
+            print(f"[BREACH] {e}")
+    return jsonify({"pwned":result.get("pwned",False),"count":result.get("count",0),"breach_status":status})
+
+@app.route("/api/v1/devsecops/breach/check-all", methods=["POST"])
+def api_devsecops_breach_check_all():
+    import threading, time as _t
+    from threat_intel import check_password_breach
+    conn = _get_conn()
+    rows = conn.execute("SELECT id, details FROM incident WHERE source='gitleaks'").fetchall()
+    def run():
+        for row in rows:
+            try:
+                det = json.loads(row[1])
+                secret = det.get("secret_hint","") or det.get("secret","")
+                if not secret or len(secret)<4: continue
+                r = check_password_breach(secret)
+                det["breach_status"] = "COMPROMISED" if r.get("pwned") else "CLEAN"
+                det["breach_count"] = r.get("count",0)
+                c = _get_conn()
+                c.execute("UPDATE incident SET details=? WHERE id=?", (json.dumps(det), row[0]))
+                c.commit()
+                _t.sleep(0.15)
+            except Exception as e:
+                print(f"[BREACH-ALL] {e}")
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"status":"started","total":len(rows)})
 
 if __name__ == "__main__":
     # Démarrer le scheduler automatique

@@ -257,63 +257,55 @@ def verify_exploit_virustotal(cve_id: str) -> dict:
         return {"vt_verified": False, "vt_error": str(e)}
 
 
-def compute_reality_score(cve: dict, vt_result: dict) -> dict:
+def compute_reality_score(cve: dict, vt_result: dict = None) -> dict:
     """
-    Calculer un score de confiance 'est-ce réel et exploitable?'
-    Basé sur: CISA KEV + EPSS + VT + CVSS + has_exploit
+    Score de priorisation CVE basé sur 3 sources fiables :
+    - CISA KEV  : exploitation active confirmée (+40)
+    - EPSS      : probabilité exploitation 30j FIRST.org (+25/+10)
+    - Exploit   : exploit public ExploitDB/GitHub (+20)
+    - CVSS      : sévérité technique NIST (+10 si >= 9.0)
+    Max = 40+25+20+10 = 95 pts
+    Note : VT non utilisé ici — VT sert pour IOC (IPs/URLs), pas CVE.
     """
     score = 0
     evidence = []
 
-    # CISA KEV = confirmation officielle exploitation active
+    # 1. CISA KEV — source officielle la plus fiable (+40)
     if cve.get("actively_exploited"):
         score += 40
-        evidence.append("CISA KEV confirmed")
+        evidence.append("CISA KEV — exploitation active confirmée")
 
-    # EPSS > 0.5 = forte probabilité exploitation
+    # 2. EPSS — probabilité exploitation dans 30j (+25 ou +10)
     epss = cve.get("epss_score") or 0
     if epss >= 0.5:
         score += 25
-        evidence.append(f"EPSS={epss:.2%} — high probability")
+        evidence.append(f"EPSS={epss:.1%} — probabilité élevée")
     elif epss >= 0.1:
         score += 10
-        evidence.append(f"EPSS={epss:.2%} — moderate probability")
+        evidence.append(f"EPSS={epss:.1%} — probabilité modérée")
 
-    # Exploit public connu
+    # 3. Exploit public connu (+20)
     if cve.get("has_exploit"):
         score += 20
-        evidence.append(f"Public exploit via {cve.get('exploit_source','unknown')}")
+        evidence.append(f"Exploit public via {cve.get('exploit_source', 'unknown')}")
 
-    # VirusTotal confirmation
-    if vt_result.get("vt_exploit_found"):
-        score += 15
-        evidence.append(f"VT: {vt_result.get('vt_item_count')} items found")
-    if vt_result.get("vt_malicious", 0) > 0:
-        score += 10
-        evidence.append(f"VT: {vt_result['vt_malicious']} malicious detections")
-
-    # CVSS critique
+    # 4. CVSS critique (+10)
     cvss = cve.get("cvss_score") or 0
     if cvss >= 9.0:
         score += 10
-        evidence.append(f"CVSS={cvss} Critical")
+        evidence.append(f"CVSS={cvss} — critique")
 
     score = min(score, 100)
-    if score >= 75:
-        confidence = "CONFIRMED"
-    elif score >= 50:
-        confidence = "LIKELY"
-    elif score >= 25:
-        confidence = "POSSIBLE"
-    else:
-        confidence = "UNVERIFIED"
+    if score >= 75:   confidence = "CONFIRMED"
+    elif score >= 50: confidence = "LIKELY"
+    elif score >= 25: confidence = "POSSIBLE"
+    else:             confidence = "UNVERIFIED"
 
     return {
         "reality_score":    score,
         "reality_level":    confidence,
         "reality_evidence": evidence
     }
-
 
 def enrich_cve(cve_id: str, use_vt: bool = True) -> dict:
     """Enrichir une CVE complètement."""

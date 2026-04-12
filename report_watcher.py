@@ -202,6 +202,70 @@ def process_file(filepath: str):
         # 4. Persister en base
         conn = get_conn()
         _auto_enrich_cves(conn, result["findings"])
+        # Scan mots de passe faibles dans les fichiers de config du projet
+        if tool == "gitleaks":
+            try:
+                from auto_detector import detect_weak_passwords
+                import glob
+                config_files = glob.glob(f'/opt/ctiops/reports/{project}/{build.lstrip("#")}/*.properties')
+                config_files += glob.glob(f'/opt/ctiops/reports/{project}/{build.lstrip("#")}/*.yml')
+                config_files += glob.glob(f'/opt/ctiops/reports/{project}/{build.lstrip("#")}/*.yaml')
+                for cfg in config_files:
+                    try:
+                        text = open(cfg).read()
+                        weak = detect_weak_passwords(text)
+                        for w in weak:
+                            w["project"] = project
+                            w["build"] = build
+                            w["file"] = cfg
+                            w["source"] = "gitleaks"
+                            w["tool"] = "gitleaks"
+                            result["findings"].append(w)
+                    except: pass
+            except Exception as e:
+                print(f"[WATCHER] weak-pwd scan error: {e}")
+
+        # HIBP check pour gitleaks - utilise le secret COMPLET depuis le rapport original
+        if tool == "gitleaks":
+            try:
+                from threat_intel import check_password_breach
+                import time as _time
+                # Lire les secrets complets depuis le rapport original
+                secret_map = {}
+                try:
+                    raw = json.load(open(filepath))
+                    for item in (raw if isinstance(raw, list) else []):
+                        hint = (item.get("Secret","") or "")[:30]
+                        secret_map[hint] = item.get("Secret","")
+                except: pass
+                for f in result["findings"]:
+                    hint = f.get("secret_hint","")
+                    full_secret = secret_map.get(hint) or hint
+                    if full_secret and len(full_secret) > 4:
+                        hibp = check_password_breach(full_secret)
+                        f["breach_status"] = "COMPROMISED" if hibp.get("pwned") else "CLEAN"
+                        f["breach_count"] = hibp.get("count", 0)
+                        if hibp.get("pwned"):
+                            print(f"[HIBP] COMPROMISED: {f.get('rule_id')} | {hint[:20]} | {hibp.get('count')} fuites")
+                        _time.sleep(0.15)
+            except Exception as e:
+                print(f"[WATCHER] HIBP error: {e}")
+
+        # Sync CVSS/severity from CVE table into findings
+        for f in result["findings"]:
+            cve_id = f.get("id","") or f.get("cve_id","")
+            if cve_id and cve_id.startswith("CVE-"):
+                row = conn.execute("SELECT cvss_score, epss_score FROM cve WHERE id=?", (cve_id,)).fetchone()
+                if row and row[0]:
+                    cvss = float(row[0])
+                    f["cvss"] = cvss
+                    f["cvss_score"] = cvss
+                    f["epss"] = float(row[1] or 0)
+                    f["epss_score"] = float(row[1] or 0)
+                    if cvss >= 9.0: f["severity"] = "CRITICAL"
+                    elif cvss >= 7.0: f["severity"] = "HIGH"
+                    elif cvss >= 4.0: f["severity"] = "MEDIUM"
+                    elif cvss > 0: f["severity"] = "LOW"
         inserted = 0
         for f in result["findings"]:
             details = json.dumps({
@@ -228,6 +292,8 @@ def process_file(filepath: str):
                 "secret_hint":   f.get("secret_hint",""),
                 "entropy":       f.get("entropy",0),
                 "source_file":   fname,
+                "breach_status": f.get("breach_status","PENDING"),
+                "breach_count":  f.get("breach_count",0),
             })
             try:
                 conn.execute("""
