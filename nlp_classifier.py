@@ -186,7 +186,7 @@ def train():
         "cv_f1_std":     round(cv_scores.std(), 4),
     }
     joblib.dump(model_data, MODEL_PATH)
-    print(f"\n✅ Modèle sauvegardé → {MODEL_PATH}")
+    print(f"\n Modèle sauvegardé → {MODEL_PATH}")
     print(f"   Accuracy: {accuracy:.1%} | F1-Macro (CV): {cv_scores.mean():.3f}")
     return pipeline
 
@@ -301,7 +301,7 @@ def reclassify(only_unknown: bool = True, batch_size: int = 200):
         print(f"[NLP] {done}/{len(rows)} traités... ({changed} changements)")
     
     conn.close()
-    print(f"\n✅ Re-classification terminée:")
+    print(f"\n Re-classification terminée:")
     print(f"   Total traités : {updated}")
     print(f"   Changements   : {changed}")
 
@@ -381,12 +381,12 @@ if __name__ == "__main__":
     elif cmd == "status":
         if os.path.exists(MODEL_PATH):
             data = joblib.load(MODEL_PATH)
-            print(f"✅ Modèle présent")
+            print(f" Modèle présent")
             print(f"   Accuracy    : {data.get('accuracy','?')}")
             print(f"   F1-Macro CV : {data.get('cv_f1_macro','?')} ± {data.get('cv_f1_std','?')}")
             print(f"   Train set   : {data.get('n_train','?')} CVE")
         else:
-            print(f"❌ Modèle absent — lancez: python3 nlp_classifier.py train")
+            print(f" Modèle absent — lancez: python3 nlp_classifier.py train")
     
     else:
         print(f"Commande inconnue: {cmd}")

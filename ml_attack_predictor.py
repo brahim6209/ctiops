@@ -210,6 +210,10 @@ def generate_training_data():
 
 # ── Entraînement du modèle ────────────────────────────────────
 _model = None
+_model_metrics = {
+    "mae": None, "r2": None, "n_estimators": 200,
+    "trained_at": None, "n_samples": 0, "top_features": []
+}
 _feature_names = [
     'nb_cve','nb_critical','nb_high','nb_kev','nb_exploit',
     'max_cvss','avg_cvss','max_epss','avg_epss',
@@ -218,6 +222,10 @@ _feature_names = [
     'nb_scanners','has_gitleaks','has_trivy','has_owasp','has_sonarqube',
     'top_attack_score'
 ]
+
+def get_metrics():
+    """Retourne les métriques du modèle ML."""
+    return dict(_model_metrics)
 
 def get_model():
     global _model
@@ -251,6 +259,13 @@ def get_model():
         mae  = mean_absolute_error(y_test, y_pred)
         r2   = r2_score(y_test, y_pred)
         print(f"[ML-RF] MAE: {mae:.2f} | R²: {r2:.3f} | Trees: 200")
+        import datetime
+        _model_metrics["mae"] = round(mae, 3)
+        _model_metrics["r2"] = round(r2, 3)
+        _model_metrics["trained_at"] = datetime.datetime.utcnow().isoformat()
+        _model_metrics["n_samples"] = len(X)
+        _model_metrics["top_features"] = [(f, round(float(i), 3)) for f, i in
+            zip(_feature_names, rf.feature_importances_)][:5] if hasattr(rf, 'feature_importances_') else []
 
         # Feature importance top 5
         importances = sorted(
