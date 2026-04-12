@@ -81,12 +81,13 @@ class PatchRLAgent:
     Reward: risk_reduced + dependency_bonus - 0.1 * patch_cost
     """
 
-    def __init__(self, n_actions=10, learning_rate=0.1, discount=0.95, epsilon=0.1):
+    def __init__(self, n_actions=10, learning_rate=0.1, discount=0.95, epsilon=0.1, seed=42):
         self.n  = n_actions
         self.lr = learning_rate
         self.gamma   = discount
         self.epsilon = epsilon
         self.q_table: dict = {}  # state_key → [Q-values par action]
+        np.random.seed(seed)  # reproductibilité
 
     def _state_key(self, cves: list) -> str:
         """Représentation discrète de l'état pour Q-table."""
