@@ -1,3 +1,6 @@
+import os
+import json
+
 """
 cwe_mitre_mapper.py — Mapping officiel CWE → Attack Type → MITRE ATT&CK
 Sources :
@@ -202,6 +205,44 @@ ATTACK_TYPE_TO_MITRE = {
     },
 }
 
+def load_mitre_technique(technique_id: str) -> dict:
+    """
+    Charger les détails d un technique ATT&CK depuis le fichier STIX officiel.
+    Source : MITRE enterprise-attack.json (835 techniques)
+    """
+    stix_path = os.path.join(os.path.dirname(__file__), "data", "mitre_techniques.json")
+    if not os.path.exists(stix_path):
+        return ATTACK_TYPE_TO_MITRE.get("UNKNOWN")
+    
+    try:
+        with open(stix_path) as f:
+            techniques = json.load(f)
+        t = techniques.get(technique_id)
+        if t:
+            return {
+                "technique": technique_id,
+                "name":      t["name"],
+                "tactic":    ", ".join(t["tactics"]),
+                "url":       f"https://attack.mitre.org/techniques/{technique_id.replace('.','/')}"
+            }
+    except:
+        pass
+    return ATTACK_TYPE_TO_MITRE.get("UNKNOWN")
+
+def get_mitre_from_attack_type_stix(attack_type: str) -> dict:
+    """
+    Retourne le mapping MITRE ATT&CK depuis le fichier STIX officiel.
+    Fallback sur le dictionnaire statique si STIX non disponible.
+    """
+    static = ATTACK_TYPE_TO_MITRE.get(attack_type, ATTACK_TYPE_TO_MITRE["UNKNOWN"])
+    tech_id = static.get("technique", "T1190")
+    
+    # Essayer de charger depuis STIX
+    stix_data = load_mitre_technique(tech_id)
+    if stix_data and stix_data.get("name"):
+        return stix_data
+    return static
+
 def get_attack_type_from_cwe(cwe_id: str) -> str:
     """
     Retourne le type d'attaque depuis un CWE ID.
@@ -217,8 +258,8 @@ def get_attack_type_from_cwe(cwe_id: str) -> str:
     return CWE_TO_ATTACK_TYPE.get(cwe_id, None)
 
 def get_mitre_from_attack_type(attack_type: str) -> dict:
-    """Retourne le mapping MITRE ATT&CK pour un type d'attaque."""
-    return ATTACK_TYPE_TO_MITRE.get(attack_type, ATTACK_TYPE_TO_MITRE["UNKNOWN"])
+    """Retourne le mapping MITRE ATT&CK — source STIX officielle avec fallback statique."""
+    return get_mitre_from_attack_type_stix(attack_type)
 
 def classify_with_cwe_priority(cwe_id: str, description: str, nlp_classifier=None) -> dict:
     """
