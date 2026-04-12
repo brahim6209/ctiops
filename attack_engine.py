@@ -276,9 +276,18 @@ def analyze_kill_chain():
         f = extract_features(d)
         prob = ml_probability(f, d)
         techs = get_techniques(d.get("description","")) or ["T1190"]
+        
+        # ── ML Kill Chain prediction ──
+        desc = d.get("description","")
+        kc_pred = predict_kill_chain_stage(desc) if desc else None
+        
         for tech in techs[:2]:
             info = MITRE_MAP.get(tech, {"stage":4,"name":tech,"kill_chain":"Exploitation"})
-            sid = info["stage"]
+            # Utiliser ML si confiance > 50%, sinon mapping statique
+            if kc_pred and kc_pred.get('confidence', 0) >= 50:
+                sid = kc_pred['stage']
+            else:
+                sid = info["stage"]
             stages[sid]["items"].append({
                 "type":"cve","id":d["id"],"label":d["id"],
                 "technique":tech,"technique_name":info["name"],
