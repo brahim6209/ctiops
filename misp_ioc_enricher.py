@@ -7,7 +7,7 @@ import requests, urllib3, sqlite3
 urllib3.disable_warnings()
 
 MISP_URL = "https://localhost"
-MISP_KEY = "4CpRG1g4sQqecJy3l1f1tCHroczs7xj2pQFQCdrC"
+MISP_KEY = ""
 HEADERS  = {
     "Authorization": MISP_KEY,
     "Accept": "application/json",
