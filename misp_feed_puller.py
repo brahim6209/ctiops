@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from database import get_conn
 
 urllib3.disable_warnings()
-load_dotenv('/home/br1kx/cti/ctiops/.env')
+load_dotenv()
 
 MISP_URL = os.getenv('MISP_URL', 'https://localhost')
 MISP_KEY = os.getenv('MISP_KEY')

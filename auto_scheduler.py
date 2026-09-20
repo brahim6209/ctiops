@@ -152,7 +152,7 @@ def task_misp_sync():
         from database import get_conn
         import os
         from dotenv import load_dotenv
-        load_dotenv('/home/br1kx/cti/ctiops/.env')
+        load_dotenv()
 
         # 1. Push CVE + incidents
         c_pushed = push_cves(limit=10)

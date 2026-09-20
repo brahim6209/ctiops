@@ -4,7 +4,7 @@ Structure réelle: EventTag[].Tag.name pour /events/index
 """
 import os, re, requests
 from dotenv import load_dotenv
-load_dotenv('/home/br1kx/cti/ctiops/.env')
+load_dotenv()
 
 MISP_URL = os.getenv("MISP_URL", "https://localhost")
 MISP_KEY = os.getenv("MISP_KEY", "")

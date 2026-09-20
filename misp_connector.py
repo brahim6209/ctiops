@@ -9,7 +9,7 @@ from pymisp import PyMISP, MISPEvent, MISPAttribute
 from dotenv import load_dotenv
 from database import get_conn
 
-load_dotenv('/home/br1kx/cti/ctiops/.env')
+load_dotenv()
 
 MISP_URL  = os.getenv("MISP_URL", "https://localhost")
 MISP_KEY  = os.getenv("MISP_KEY", "ctiprojectapikey1234567890abcdef12345678")
