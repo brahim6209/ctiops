@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from database import get_conn
 
 urllib3.disable_warnings()
-load_dotenv('/home/br1kx/cti/ctiops/.env')
+load_dotenv()
 VT_KEY = os.getenv('VIRUSTOTAL_API_KEY')
 
 VT_BASE = "https://www.virustotal.com/api/v3"

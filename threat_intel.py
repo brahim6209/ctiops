@@ -6,7 +6,7 @@ import requests, os, json, hashlib
 from dotenv import load_dotenv
 from database import get_conn, insert_ioc
 
-load_dotenv('/home/br1kx/cti/ctiops/.env')
+load_dotenv()
 
 LEAKCHECK_KEY = os.getenv("LEAKCHECK_API_KEY", "")
 
