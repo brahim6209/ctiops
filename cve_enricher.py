@@ -9,19 +9,19 @@ cve_enricher.py — Enrichissement complet des CVE
 import os, re, json, requests, time
 from database import get_conn
 from dotenv import load_dotenv
-
-load_dotenv('/home/br1kx/cti/ctiops/.env')
-VT_KEY = os.getenv("VIRUSTOTAL_API_KEY", "")
-
-# ─── NLP Classifier ──────────────────────────────────────────────────────────
-try:
-    from nlp_classifier import NLPClassifier as _NLPClassifier
 from cwe_mitre_mapper import (
     classify_with_cwe_priority,
     get_mitre_from_attack_type,
     get_attack_type_from_cwe,
     ATTACK_TYPE_TO_MITRE
 )
+
+load_dotenv()
+VT_KEY = os.getenv("VIRUSTOTAL_API_KEY", "")
+
+# ─── NLP Classifier ──────────────────────────────────────────────────────────
+try:
+    from nlp_classifier import NLPClassifier as _NLPClassifier
     _nlp = _NLPClassifier.get()
 except Exception as _e:
     _nlp = None
