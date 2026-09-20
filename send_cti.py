@@ -276,7 +276,7 @@ def send_owasp():
 def send_sonarqube():
     SONAR_URL   = os.environ.get("SONAR_HOST_URL", "http://localhost:9000")
     SONAR_TOKEN = os.environ.get("SONAR_TOKEN", "")
-    PROJECT_KEY = os.environ.get("SONAR_PROJECT_KEY", "toptrucks")
+    PROJECT_KEY = os.environ.get("SONAR_PROJECT_KEY", "my-project")
 
     if not SONAR_TOKEN:
         print("sonarqube: pas de token SONAR_TOKEN, skip")
